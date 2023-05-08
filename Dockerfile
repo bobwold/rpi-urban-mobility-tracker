@@ -45,6 +45,14 @@ RUN pip3 install astunparse==1.6.3
 RUN pip3 install termcolor==1.1.0
 RUN pip3 install flatbuffers==1.12
 
+# install coral essentials
+RUN apt-get install -y curl
+RUN echo "deb https://packages.cloud.google.com/apt coral-edgetpu-stable main" | tee /etc/apt/sources.list.d/coral-edgetpu.list
+RUN curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add -
+RUN apt-get update
+RUN apt-get install -y libedgetpu1-std
+RUN apt-get install -y python3-pycoral
+
 # install tflite runtime
 RUN pip3 install https://github.com/google-coral/pycoral/releases/download/release-frogfish/tflite_runtime-2.5.0-cp37-cp37m-linux_armv7l.whl
 

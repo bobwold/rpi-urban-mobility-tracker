@@ -66,5 +66,14 @@ RUN apt-get install -y git
 # install deep sort
 RUN pip3 install git+https://github.com/mk-michal/deep_sort
 
-# install umt
-RUN pip3 install git+https://github.com/nathanrooy/rpi-urban-mobility-tracker --no-deps
+# bikestreets custom
+
+# Install from Bryan's repo
+#RUN pip3 install git+https://github.com/TravelByRocket/bikestreets-umt --no-deps
+
+#Install from local source
+ADD ./ ./
+RUN pip3 install ./ --no-deps
+
+COPY generate_detections.py /usr/local/lib/python3.7/dist-packages/deep_sort_tools/
+CMD umt -camera -tpu

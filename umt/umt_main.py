@@ -1,11 +1,15 @@
 #--- IMPORT DEPENDENCIES ------------------------------------------------------+
 
 import os
+import sys
 import time
+import datetime
 import argparse
 
 import cv2
 import numpy as np
+
+import logging
 
 # deep sort
 from deep_sort.tracker import Tracker
@@ -21,12 +25,33 @@ from umt.umt_utils import generate_detections
 
 LABEL_PATH = "models/tflite/coco_ssd_mobilenet_v1_1.0_quant_2018_06_29/labelmap.txt"
 DEFAULT_LABEL_MAP_PATH = os.path.join(os.path.dirname(__file__), LABEL_PATH)
-TRACKER_OUTPUT_TEXT_FILE = 'object_paths.csv'
+
+OUTPUT_PATH = os.path.join("output/", time.strftime("%Y-%m-%d %H:%M")) 
+TRACKER_OUTPUT_TEXT_FILE = os.path.join(OUTPUT_PATH, 'object_paths.csv')
+FRAME_OUTPUT_PATH = os.path.join(OUTPUT_PATH, "frames/")
+#VIDEO_OUTPUT_PATH = os.path.join(OUTPUT_PATH, "video/")
+
+if not os.path.exists(OUTPUT_PATH): os.makedirs(OUTPUT_PATH)
+if not os.path.exists(OUTPUT_PATH): os.makedirs(FRAME_OUTPUT_PATH)
 
 # deep sort related
 MAX_COSINE_DIST = 0.4
 NN_BUDGET = None
 NMS_MAX_OVERLAP = 1.0
+
+#--- LOGGING  ----------------------------------------------------------------+
+#logging.basicConfig(filename='umt.log', level=logging.DEBUG)
+#logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
+
+rootLogger = logging.getLogger()
+
+fileHandler = logging.FileHandler("{0}/{1}.log".format(OUTPUT_PATH, 'umt'))
+rootLogger.addHandler(fileHandler)
+
+consoleHandler = logging.StreamHandler()
+rootLogger.addHandler(consoleHandler)
+
+rootLogger.setLevel(logging.DEBUG)
 
 #--- MAIN ---------------------------------------------------------------------+
 
@@ -51,17 +76,14 @@ def main():
     if args.label_map_path: assert os.path.exists(args.label_map_path)==True, "can't find the specified label map..."
     if args.video_path: assert os.path.exists(args.video_path)==True, "can't find the specified video file..."
 
-    print('> INITIALIZING UMT...')
-    print('   > THRESHOLD:',args.threshold)
+    logging.info('> INITIALIZING UMT...')
+    logging.info(f'   > THRESHOLD: {args.threshold}')
 
 	# parse label map
     labels = parse_label_map(args, DEFAULT_LABEL_MAP_PATH)
     
     # initialize detector
     interpreter = initialize_detector(args)
-
-    # create output directory
-    if not os.path.exists('output') and args.save_frames: os.makedirs('output')
  
  	# initialize deep sort tracker   
     metric = nn_matching.NearestNeighborDistanceMetric("cosine", MAX_COSINE_DIST, NN_BUDGET)
@@ -74,12 +96,20 @@ def main():
     if args.live_view or args.save_frames: COLORS = (np.random.rand(32, 3) * 255).astype(int)
 
     # main tracking loop
-    print('\n> TRACKING...')
+    logging.info('> TRACKING...')
+
+    ### Performance Metrics
+    # used to record the time when we processed last frame
+    prev_frame_time = 0
+    # used to record the time at which we processed current frame
+    new_frame_time = 0
+    ###
+    
     with open(TRACKER_OUTPUT_TEXT_FILE, 'w') as out_file:
         for i, pil_img in enumerate(img_generator(args)):
         
             f_time = int(time.time())
-            print('> FRAME:', i)
+            logging.debug(f'> FRAME: {i}')
             
             # add header to trajectory file
             if i == 0:
@@ -92,7 +122,7 @@ def main():
             detections = generate_detections(pil_img, interpreter, args.threshold)
 			
             # proceed to updating state
-            if len(detections) == 0: print('   > no detections...')
+            if len(detections) == 0: logging.debug('   > no detections...')
             else:
             
                 # update tracker
@@ -136,7 +166,22 @@ def main():
                     cv2.waitKey(1)
                     
                 # persist frames
-                if args.save_frames: cv2.imwrite(f'output/frame_{i}.jpg', cv2_img)
+                if args.save_frames: cv2.imwrite(os.path.join(FRAME_OUTPUT_PATH, f'frame_{i:0>7}.jpg'), cv2_img)
+            
+            ##### Calculating the fps
+
+            # time when we finish processing for this frame
+            new_frame_time = time.time()
+        
+            # fps will be number of frame processed in given time frame
+            # since their will be most of time error of 0.001 second
+            # we will be subtracting it to get more accurate result
+            fps = 1/(new_frame_time-prev_frame_time)
+            prev_frame_time = new_frame_time
+        
+            # converting the fps into integer
+            #fps = int(fps)
+            logging.debug(f'  FPS: {fps}')
                 
     cv2.destroyAllWindows()         
     pass

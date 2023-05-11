@@ -10,6 +10,8 @@ from scipy.spatial.distance import cosine
 import imutils
 from imutils.video import VideoStream
 
+import logging
+
 # deep sort
 #from umt.deep_sort import generate_detections as gd
 #from umt.deep_sort.detection import Detection
@@ -29,7 +31,7 @@ encoder = gd.create_box_encoder(w_path, batch_size=1)
 def camera_frame_gen(args):
 
     # initialize the video stream and allow the camera sensor to warmup
-    print("> starting video stream...")
+    logging.info("> starting video stream...")
     vs = VideoStream(src=0).start()
     sleep(2.0)
 
@@ -93,16 +95,16 @@ def initialize_detector(args):
 
     # initialize coral tpu model
     if args.tpu:
-        print('   > TPU = TRUE')
+        logging.info('   > TPU = TRUE')
         
         if args.model_path:
             model_path = args.model_path
-            print('   > CUSTOM DETECTOR = TRUE')
-            print(f'      > DETECTOR PATH = {model_path}')
+            logging.info('   > CUSTOM DETECTOR = TRUE')
+            logging.info(f'      > DETECTOR PATH = {model_path}')
         	
         else:
         	model_path = os.path.join(os.path.dirname(__file__), TPU_PATH)
-        	print('   > CUSTOM DETECTOR = FALSE')
+        	logging.info('   > CUSTOM DETECTOR = FALSE')
         
         _, *device = model_path.split('@')
         edgetpu_shared_lib = 'libedgetpu.so.1'
@@ -116,15 +118,15 @@ def initialize_detector(args):
 
     # initialize tflite model
     else:
-        print('   > TPU = FALSE')
+        logging.info('   > TPU = FALSE')
         
         if args.model_path:
             model_path = args.model_path
-            print('   > CUSTOM DETECTOR = TRUE')
-            print(f'      > DETECTOR PATH = {model_path}')
+            logging.info('   > CUSTOM DETECTOR = TRUE')
+            logging.info(f'      > DETECTOR PATH = {model_path}')
         	
         else:
-        	print('   > CUSTOM DETECTOR = FALSE')
+        	logging.info('   > CUSTOM DETECTOR = FALSE')
         	model_path = os.path.join(os.path.dirname(__file__), CPU_PATH)
         
         interpreter = tflite.Interpreter(model_path=model_path)
@@ -196,8 +198,8 @@ def generate_detections(pil_img_obj, interpreter, threshold):
 
 
 def parse_label_map(args, DEFAULT_LABEL_MAP_PATH):
-    if args.label_map_path == DEFAULT_LABEL_MAP_PATH: print('   > CUSTOM LABEL MAP = FALSE')
-    else: print(f'   > CUSTOM LABEL MAP = TRUE ({args.label_map_path})')
+    if args.label_map_path == DEFAULT_LABEL_MAP_PATH: logging.info('   > CUSTOM LABEL MAP = FALSE')
+    else: logging.info(f'   > CUSTOM LABEL MAP = TRUE ({args.label_map_path})')
 
     labels = {}
     for i, row in enumerate(open(args.label_map_path)):

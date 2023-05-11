@@ -26,7 +26,7 @@ from umt.umt_utils import generate_detections
 
 LABEL_PATH = "models/tflite/coco_ssd_mobilenet_v1_1.0_quant_2018_06_29/labelmap.txt"
 DEFAULT_LABEL_MAP_PATH = os.path.join(os.path.dirname(__file__), LABEL_PATH)
-OUTPUT_PATH = os.path.join("output/", time.strftime("%Y-%m-%d %H:%M")) 
+OUTPUT_PATH = os.path.join("output/", time.strftime("%Y-%m-%d_%H_%M")) 
 TRACKER_OUTPUT_TEXT_FILE = os.path.join(OUTPUT_PATH, 'object_paths.csv')
 FRAME_OUTPUT_PATH = os.path.join(OUTPUT_PATH, "frames/")
 VIDEO_OUTPUT_PATH = os.path.join(OUTPUT_PATH, "video/")
@@ -45,10 +45,12 @@ NMS_MAX_OVERLAP = 1.0
 rootLogger = logging.getLogger()
 
 fileHandler = logging.FileHandler("{0}/{1}.log".format(OUTPUT_PATH, 'umt'))
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+fileHandler.setFormatter(formatter)
 rootLogger.addHandler(fileHandler)
 
-consoleHandler = logging.StreamHandler()
-rootLogger.addHandler(consoleHandler)
+#consoleHandler = logging.StreamHandler()
+#rootLogger.addHandler(consoleHandler)
 
 rootLogger.setLevel(logging.DEBUG)
 
@@ -105,12 +107,19 @@ def main():
     prev_frame_time = 0
     # used to record the time at which we processed current frame
     new_frame_time = 0
+
+    prev_video_time = 0
+    # used to record the time at which we processed current frame
+    new_video_time = 0
+    frames_at_start_of_video = 0
     ###
 
     # ensure the folders are created for the frames and the videos
     if args.save_frames:
         if not os.path.exists(FRAME_OUTPUT_PATH): os.makedirs(FRAME_OUTPUT_PATH)
         if not os.path.exists(VIDEO_OUTPUT_PATH): os.makedirs(VIDEO_OUTPUT_PATH)
+
+    videoStartTime = time.time()
     
     with open(TRACKER_OUTPUT_TEXT_FILE, 'w') as out_file:
         for i, pil_img in enumerate(img_generator(args)):
@@ -125,13 +134,34 @@ def main():
                     'xmin,ymin,xmax,ymax')
                 print(header, file=out_file)
             
-            framesIn10Minutes = 30*60*10
-            if( (i % framesIn10Minutes) == 0) and args.save_frames:
-                # note: selecting 30fps is certainly wrong-- the wrongness will depend on the speed of processing (most specifically if 
-                # we have GPU / TPU capabilities.)
-                videoId = time.strftime("%Y-%m-%d %H:%M")
-                originalVideoWriter = cv2.VideoWriter(os.path.join(VIDEO_OUTPUT_PATH, f'raw_{videoId}.avi'), cv2.VideoWriter_fourcc('M','J','P','G'), 30, (pil_img.width,pil_img.height))
-                #detectedVideoWriter = cv2.VideoWriter(os.path.join(VIDEO_OUTPUT_PATH, f'detected_{videoId}.avi'), cv2.VideoWriter_fourcc('M','J','P','G'), 30, (pil_img.width,pil_img.height))
+            TenMinutes = 60*10
+            if (i == 0 or time.time()-videoStartTime > TenMinutes) :
+                videoId = time.strftime("%Y-%m-%d_%H_%M")
+                videoStartTime = time.time()
+
+                if args.save_frames:
+                    #cleanup the prior files
+                    if(originalVideoWriter != None) : originalVideoWriter.release()
+                    if(detectedVideoWriter != None) : detectedVideoWriter.release()
+                    #open the new files
+                    originalVideoWriter = cv2.VideoWriter(os.path.join(VIDEO_OUTPUT_PATH, f'raw_{videoId}.avi'), cv2.VideoWriter_fourcc('M','J','P','G'), 30, (pil_img.width,pil_img.height))
+                    detectedVideoWriter = cv2.VideoWriter(os.path.join(VIDEO_OUTPUT_PATH, f'detected_{videoId}.avi'), cv2.VideoWriter_fourcc('M','J','P','G'), 30, (pil_img.width,pil_img.height))
+
+
+                #### fps for the video
+                new_video_time = time.time()
+            
+                if(prev_frame_time > 0) :
+                    fps = (i-frames_at_start_of_interval)/(new_video_time-prev_video_time)
+
+                    # converting the fps into integer
+                    fps = int(fps)
+                    logging.info(f'  >>Average FPS for video: {fps}')
+
+                prev_video_time = new_video_time
+                #######################
+
+                frames_at_start_of_interval = i
 
 
             # get detections
@@ -196,20 +226,20 @@ def main():
             # time when we finish processing for this frame
             new_frame_time = time.time()
         
-            # fps will be number of frame processed in given time frame
-            # since their will be most of time error of 0.001 second
-            # we will be subtracting it to get more accurate result
-            fps = 1/(new_frame_time-prev_frame_time)
+            if(prev_frame_time > 0) :
+                fps = 1/(new_frame_time-prev_frame_time)
+
+                # converting the fps into integer
+                fps = int(fps)
+                logging.debug(f'  FPS: {fps}')
+
             prev_frame_time = new_frame_time
         
-            # converting the fps into integer
-            #fps = int(fps)
-            logging.debug(f'  FPS: {fps}')
                 
     #cleanup the video resources                
-    if args.save_frames:
-        originalVideoWriter.release()
-        detectedVideoWriter.release()
+    if(originalVideoWriter != None) : originalVideoWriter.release()
+    if(detectedVideoWriter != None) : detectedVideoWriter.release()
+
     cv2.destroyAllWindows()         
     pass
 

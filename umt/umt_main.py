@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import datetime
+import datetime
 import argparse
 
 import cv2
@@ -25,14 +26,12 @@ from umt.umt_utils import generate_detections
 
 LABEL_PATH = "models/tflite/coco_ssd_mobilenet_v1_1.0_quant_2018_06_29/labelmap.txt"
 DEFAULT_LABEL_MAP_PATH = os.path.join(os.path.dirname(__file__), LABEL_PATH)
-
 OUTPUT_PATH = os.path.join("output/", time.strftime("%Y-%m-%d %H:%M")) 
 TRACKER_OUTPUT_TEXT_FILE = os.path.join(OUTPUT_PATH, 'object_paths.csv')
 FRAME_OUTPUT_PATH = os.path.join(OUTPUT_PATH, "frames/")
-#VIDEO_OUTPUT_PATH = os.path.join(OUTPUT_PATH, "video/")
+VIDEO_OUTPUT_PATH = os.path.join(OUTPUT_PATH, "video/")
 
 if not os.path.exists(OUTPUT_PATH): os.makedirs(OUTPUT_PATH)
-if not os.path.exists(OUTPUT_PATH): os.makedirs(FRAME_OUTPUT_PATH)
 
 # deep sort related
 MAX_COSINE_DIST = 0.4
@@ -96,6 +95,9 @@ def main():
     if args.live_view or args.save_frames: COLORS = (np.random.rand(32, 3) * 255).astype(int)
 
     # main tracking loop
+    originalVideoWriter = None
+    detectedVideoWriter = None
+
     logging.info('> TRACKING...')
 
     ### Performance Metrics
@@ -104,6 +106,11 @@ def main():
     # used to record the time at which we processed current frame
     new_frame_time = 0
     ###
+
+    # ensure the folders are created for the frames and the videos
+    if args.save_frames:
+        if not os.path.exists(FRAME_OUTPUT_PATH): os.makedirs(FRAME_OUTPUT_PATH)
+        if not os.path.exists(VIDEO_OUTPUT_PATH): os.makedirs(VIDEO_OUTPUT_PATH)
     
     with open(TRACKER_OUTPUT_TEXT_FILE, 'w') as out_file:
         for i, pil_img in enumerate(img_generator(args)):
@@ -113,10 +120,19 @@ def main():
             
             # add header to trajectory file
             if i == 0:
-            	header = (f'frame_num,rpi_time,obj_class,obj_id,obj_age,'
-            	    'obj_t_since_last_update,obj_hits,'
-            	    'xmin,ymin,xmax,ymax')
-            	print(header, file=out_file)
+                header = (f'frame_num,rpi_time,obj_class,obj_id,obj_age,'
+                    'obj_t_since_last_update,obj_hits,'
+                    'xmin,ymin,xmax,ymax')
+                print(header, file=out_file)
+            
+            framesIn10Minutes = 30*60*10
+            if( (i % framesIn10Minutes) == 0) and args.save_frames:
+                # note: selecting 30fps is certainly wrong-- the wrongness will depend on the speed of processing (most specifically if 
+                # we have GPU / TPU capabilities.)
+                videoId = time.strftime("%Y-%m-%d %H:%M")
+                originalVideoWriter = cv2.VideoWriter(os.path.join(VIDEO_OUTPUT_PATH, f'raw_{videoId}.avi'), cv2.VideoWriter_fourcc('M','J','P','G'), 30, (pil_img.width,pil_img.height))
+                #detectedVideoWriter = cv2.VideoWriter(os.path.join(VIDEO_OUTPUT_PATH, f'detected_{videoId}.avi'), cv2.VideoWriter_fourcc('M','J','P','G'), 30, (pil_img.width,pil_img.height))
+
 
             # get detections
             detections = generate_detections(pil_img, interpreter, args.threshold)
@@ -147,6 +163,10 @@ def main():
             	# convert pil image to cv2
                 cv2_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
             
+                # write a frame to the "original" video
+                if args.save_frames: 
+                    originalVideoWriter.write(cv2_img)
+
             	# cycle through actively tracked objects
                 for track in tracker.tracks:
                     if not track.is_confirmed() or track.time_since_update > 1:
@@ -166,8 +186,11 @@ def main():
                     cv2.waitKey(1)
                     
                 # persist frames
-                if args.save_frames: cv2.imwrite(os.path.join(FRAME_OUTPUT_PATH, f'frame_{i:0>7}.jpg'), cv2_img)
-            
+                if args.save_frames: 
+                    cv2.imwrite(os.path.join(FRAME_OUTPUT_PATH, f'frame_{i:0>7}.jpg'), cv2_img)
+                    # write a frame to the "detected" video
+                    detectedVideoWriter.write(cv2_img)
+
             ##### Calculating the fps
 
             # time when we finish processing for this frame
@@ -183,6 +206,10 @@ def main():
             #fps = int(fps)
             logging.debug(f'  FPS: {fps}')
                 
+    #cleanup the video resources                
+    if args.save_frames:
+        originalVideoWriter.release()
+        detectedVideoWriter.release()
     cv2.destroyAllWindows()         
     pass
 

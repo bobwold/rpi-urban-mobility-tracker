@@ -21,6 +21,7 @@ from umt.umt_utils import parse_label_map
 from umt.umt_utils import initialize_detector
 from umt.umt_utils import initialize_img_source
 from umt.umt_utils import generate_detections
+from umt.umt_utils import draw_label
 
 #--- CONSTANTS ----------------------------------------------------------------+
 
@@ -52,7 +53,7 @@ rootLogger.addHandler(fileHandler)
 #consoleHandler = logging.StreamHandler()
 #rootLogger.addHandler(consoleHandler)
 
-rootLogger.setLevel(logging.DEBUG)
+rootLogger.setLevel(logging.INFO)
 
 #--- MAIN ---------------------------------------------------------------------+
 
@@ -69,6 +70,7 @@ def main():
     parser.add_argument('-nframes', dest='nframes', type=int, required=False, default=10, help='specify nunber of frames to process')
     parser.add_argument('-display', dest='live_view', required=False, default=False, action='store_true', help='add this flag to view a live display. note, that this will greatly slow down the fps rate.')
     parser.add_argument('-save', dest='save_frames', required=False, default=False, action='store_true', help='add this flag if you want to persist the image output. note, that this will greatly slow down the fps rate.')
+    parser.add_argument('-model', dest='model', type=str, required=False, default='mobilenet', help='Model to use-- current options are mobilenet or pednet')
     args = parser.parse_args()
     
     # basic checks
@@ -76,6 +78,8 @@ def main():
     if args.model_path: assert os.path.exists(args.model_path)==True, "can't find the specified model..."
     if args.label_map_path: assert os.path.exists(args.label_map_path)==True, "can't find the specified label map..."
     if args.video_path: assert os.path.exists(args.video_path)==True, "can't find the specified video file..."
+    #if args.model: assert args.model_path, "when passing a model, you cannot also pass a model path"
+    if args.model: assert args.model == 'mobilenet' or args.model == 'pednet', "Only mobilenet or pednet are currently supported"
 
     logging.info('> INITIALIZING UMT...')
     logging.info(f'   > THRESHOLD: {args.threshold}')
@@ -165,7 +169,7 @@ def main():
 
 
             # get detections
-            detections = generate_detections(pil_img, interpreter, args.threshold)
+            detections = generate_detections(pil_img, interpreter, args.threshold, args)
 			
             # proceed to updating state
             if len(detections) == 0: logging.debug('   > no detections...')
@@ -187,6 +191,21 @@ def main():
                             f'{int(bbox[2])},{int(bbox[3])}')
                         print(row, file=out_file)
                 
+            ##### Calculating the fps 
+            # Note that it's odd to do it here, but we calculate it in time to write it on the image
+            fps = 0
+            # time when we finish processing for this frame
+            new_frame_time = time.time()
+        
+            if(prev_frame_time > 0) :
+                fps = 1/(new_frame_time-prev_frame_time)
+
+                # converting the fps into integer
+                fps = int(fps)
+                logging.debug(f'  FPS: {fps}')
+
+            prev_frame_time = new_frame_time
+
             # only for live display
             if args.live_view or args.save_frames:
             
@@ -218,23 +237,17 @@ def main():
                 # persist frames
                 if args.save_frames: 
                     cv2.imwrite(os.path.join(FRAME_OUTPUT_PATH, f'frame_{i:0>7}.jpg'), cv2_img)
+                    
+                    #write some interesting tid-bits
+                    label = (
+                        f'{time.strftime("%Y-%m-%d %H:%M:%S")}\n' 
+                        f'model: {args.model}\n' 
+                        f'tracking: {len(tracker.tracks)} objects\n'
+                        f'fps: {fps}')
+                    
+                    draw_label(cv2_img, text=label)
                     # write a frame to the "detected" video
                     detectedVideoWriter.write(cv2_img)
-
-            ##### Calculating the fps
-
-            # time when we finish processing for this frame
-            new_frame_time = time.time()
-        
-            if(prev_frame_time > 0) :
-                fps = 1/(new_frame_time-prev_frame_time)
-
-                # converting the fps into integer
-                fps = int(fps)
-                logging.debug(f'  FPS: {fps}')
-
-            prev_frame_time = new_frame_time
-        
                 
     #cleanup the video resources                
     if(originalVideoWriter != None) : originalVideoWriter.release()

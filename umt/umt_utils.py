@@ -90,21 +90,27 @@ def initialize_img_source(args):
 
 def initialize_detector(args):
 
-    TPU_PATH = 'models/tpu/mobilenet_ssd_v2_coco_quant/mobilenet_ssd_v2_coco_quant_postprocess_edgetpu.tflite'
-    CPU_PATH = 'models/tflite/coco_ssd_mobilenet_v1_1.0_quant_2018_06_29/detect.tflite'
+    MOBILENET_TPU_PATH = 'models/tpu/mobilenet_ssd_v2_coco_quant/mobilenet_ssd_v2_coco_quant_postprocess_edgetpu.tflite'
+    MOBILENET_CPU_PATH = 'models/tflite/coco_ssd_mobilenet_v1_1.0_quant_2018_06_29/detect.tflite'
+    PEDNET_TPU_PATH = 'models/tpu/pednet-v2.1/pednet_edgetpu.tflite'
+    PEDNET_CPU_PATH = 'models/tflite/pednet-v2.1/pednet.tflite'
 
     # initialize coral tpu model
     if args.tpu:
         logging.info('   > TPU = TRUE')
         
-        if args.model_path:
+        if args.model and args.model == 'pednet':
+            model_path = os.path.join(os.path.dirname(__file__), PEDNET_TPU_PATH)
+            logging.info(f'   > MODEL = {args.model}')
+            logging.info(f'      > DETECTOR PATH = {model_path}')
+        elif args.model_path:
             model_path = args.model_path
             logging.info('   > CUSTOM DETECTOR = TRUE')
             logging.info(f'      > DETECTOR PATH = {model_path}')
         	
         else:
-        	model_path = os.path.join(os.path.dirname(__file__), TPU_PATH)
-        	logging.info('   > CUSTOM DETECTOR = FALSE')
+            model_path = os.path.join(os.path.dirname(__file__), MOBILENET_TPU_PATH)
+            logging.info('   > CUSTOM DETECTOR = FALSE')
         
         _, *device = model_path.split('@')
         edgetpu_shared_lib = 'libedgetpu.so.1'
@@ -119,15 +125,17 @@ def initialize_detector(args):
     # initialize tflite model
     else:
         logging.info('   > TPU = FALSE')
-        
-        if args.model_path:
+        if args.model and args.model == 'pednet':
+            model_path = os.path.join(os.path.dirname(__file__), PEDNET_CPU_PATH)
+            logging.info(f'   > MODEL = {args.model}')
+            logging.info(f'      > DETECTOR PATH = {model_path}')
+        elif args.model_path:
             model_path = args.model_path
             logging.info('   > CUSTOM DETECTOR = TRUE')
             logging.info(f'      > DETECTOR PATH = {model_path}')
-        	
         else:
-        	logging.info('   > CUSTOM DETECTOR = FALSE')
-        	model_path = os.path.join(os.path.dirname(__file__), CPU_PATH)
+            logging.info('   > CUSTOM DETECTOR = FALSE')
+            model_path = os.path.join(os.path.dirname(__file__), MOBILENET_CPU_PATH)
         
         interpreter = tflite.Interpreter(model_path=model_path)
         interpreter.allocate_tensors()
@@ -135,7 +143,7 @@ def initialize_detector(args):
     return interpreter
 
 
-def generate_detections(pil_img_obj, interpreter, threshold):
+def generate_detections(pil_img_obj, interpreter, threshold, args):
     
     # resize image to match model input dimensions
     img = pil_img_obj.resize((interpreter.get_input_details()[0]['shape'][2], 
@@ -149,10 +157,17 @@ def generate_detections(pil_img_obj, interpreter, threshold):
     interpreter.invoke()
 
     # collect results
-    bboxes = np.squeeze(interpreter.get_tensor(interpreter.get_output_details()[0]['index']))
-    classes = np.squeeze(interpreter.get_tensor(interpreter.get_output_details()[1]['index']) + 1).astype(np.int32)
-    scores = np.squeeze(interpreter.get_tensor(interpreter.get_output_details()[2]['index']))
-    num = np.squeeze(interpreter.get_tensor(interpreter.get_output_details()[3]['index']))
+    if(args.model == 'pednet') :
+        bboxes = np.squeeze(interpreter.get_tensor(interpreter.get_output_details()[1]['index']))
+        classes = np.squeeze(interpreter.get_tensor(interpreter.get_output_details()[3]['index']) + 1).astype(np.int32)
+        scores = np.squeeze(interpreter.get_tensor(interpreter.get_output_details()[0]['index']))
+        num = np.squeeze(interpreter.get_tensor(interpreter.get_output_details()[2]['index']))
+
+    else:
+        bboxes = np.squeeze(interpreter.get_tensor(interpreter.get_output_details()[0]['index']))
+        classes = np.squeeze(interpreter.get_tensor(interpreter.get_output_details()[1]['index']) + 1).astype(np.int32)
+        scores = np.squeeze(interpreter.get_tensor(interpreter.get_output_details()[2]['index']))
+        num = np.squeeze(interpreter.get_tensor(interpreter.get_output_details()[3]['index']))
     
     # keep detections above specified threshold
     keep_idx = np.less(scores[np.greater(scores, threshold)], 1)
@@ -198,11 +213,22 @@ def generate_detections(pil_img_obj, interpreter, threshold):
 
 
 def parse_label_map(args, DEFAULT_LABEL_MAP_PATH):
-    if args.label_map_path == DEFAULT_LABEL_MAP_PATH: logging.info('   > CUSTOM LABEL MAP = FALSE')
-    else: logging.info(f'   > CUSTOM LABEL MAP = TRUE ({args.label_map_path})')
 
+    PEDNET_LABEL_PATH = 'models/tpu/pednet-v2.1/pednet-labels.txt'
+
+    label_map_path = ""
+    if(args.model == 'pednet'):
+        label_map_path = os.path.join(os.path.dirname(__file__), PEDNET_LABEL_PATH)
+    elif args.label_map_path == DEFAULT_LABEL_MAP_PATH: 
+        logging.info('   > CUSTOM LABEL MAP = FALSE')
+        label_map_path = args.label_map_path
+    else: 
+        logging.info(f'   > CUSTOM LABEL MAP = TRUE ({args.label_map_path})')
+        label_map_path = args.label_map_path
+
+    logging.info(f'   > LABEL MAP PATH: {label_map_path}')
     labels = {}
-    for i, row in enumerate(open(args.label_map_path)):
+    for i, row in enumerate(open(label_map_path)):
         labels[i] = row.replace('\n','')
     return labels
 
@@ -268,3 +294,80 @@ def non_max_suppression(boxes, max_bbox_overlap, scores=None):
                 ([last], np.where(overlap > max_bbox_overlap)[0])))
 
     return pick
+
+#def draw_label(img, text, pos, bg_color):
+#    font_face = cv2.FONT_HERSHEY_SIMPLEX
+#    scale = 0.4
+#    color = (0, 0, 0)
+#    thickness = cv2.FILLED
+#    margin = 2
+#    x = pos[0]
+#    y = pos[1]
+#    for i, line in enumerate(text.split('\n')):
+#        txt_size = cv2.getTextSize(line, font_face, scale, thickness)
+#        txt_height = txt_size[0][1] 
+#        txt_width = txt_size[0][0]
+#
+#        cv2.rectangle(img, (x, y), (txt_width, txt_height), bg_color, thickness)
+#        cv2.putText(img, line, (x, y), font_face, scale, color, 1, cv2.LINE_AA)
+#        y = y + txt_height\
+
+def draw_label(
+    img,
+    *,
+    text,
+    uv_top_left=(5,5),
+    color=(255, 255, 255),
+    fontScale=0.5,
+    thickness=1,
+    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+    outline_color=(0, 0, 0),
+    line_spacing=1.5,
+):
+    """
+    Draws multiline with an outline.
+    """
+    assert isinstance(text, str)
+
+    uv_top_left = np.array(uv_top_left, dtype=float)
+    assert uv_top_left.shape == (2,)
+
+    for line in text.splitlines():
+        (w, h), _ = cv2.getTextSize(
+            text=line,
+            fontFace=fontFace,
+            fontScale=fontScale,
+            thickness=thickness,
+        )
+        uv_bottom_left_i = uv_top_left + [0, h]
+        org = tuple(uv_bottom_left_i.astype(int))
+
+        if outline_color is not None:
+            cv2.putText(
+                img,
+                text=line,
+                org=org,
+                fontFace=fontFace,
+                fontScale=fontScale,
+                color=outline_color,
+                thickness=thickness * 3,
+                lineType=cv2.LINE_AA,
+            )
+        cv2.putText(
+            img,
+            text=line,
+            org=org,
+            fontFace=fontFace,
+            fontScale=fontScale,
+            color=color,
+            thickness=thickness,
+            lineType=cv2.LINE_AA,
+        )
+
+        uv_top_left += [0, h * line_spacing]
+   #cv2.rectangle(img, pos, (end_x, end_y), bg_color, thickness)
+   #cv2.putText(img, text, pos, font_face, scale, color, 1, cv2.LINE_AA)
+    #y0, dy = 50, 4
+    #for i, line in enumerate(text.split('\n')):
+    #    y = y0 + i*dy
+    #    cv2.putText(img, line, (50, y ), cv2.FONT_HERSHEY_SIMPLEX, 1, 2)

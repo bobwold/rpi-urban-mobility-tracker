@@ -51,6 +51,7 @@ For Field testing, you'll want your docker image to restart when the device boot
 3. Get all the images with `scp -r pi@raspberrypi.local:/home/pi/umt_output/output .` to put it in the current directory (Downloads)
 
 ## Notes
+- periodically prune docer during development `docker system prune`
 - Change `umt` to use a new filename every time it starts
 - Use `scp` to move over a directory of CSVs or somehow specify a range
 - Can execute commands after/within `ssh` as shown [here](https://stackoverflow.com/questions/26434604/bash-script-execute-commands-after-ssh)

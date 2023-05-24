@@ -63,6 +63,10 @@ RUN apt-get install -y vim
 # install git
 RUN apt-get install -y git
 
+                       
+RUN pip3 install "git+https://github.com/ytdl-org/youtube-dl.git"
+RUN pip3 install "git+https://github.com/mps-youtube/pafy.git@refs/pull/328/head"
+
 # install deep sort
 RUN pip3 install git+https://github.com/mk-michal/deep_sort
 
@@ -76,4 +80,10 @@ ADD ./ ./
 RUN pip3 install ./ --no-deps
 
 COPY generate_detections.py /usr/local/lib/python3.7/dist-packages/deep_sort_tools/
-CMD umt -camera -tpu
+
+CMD umt -camera -tpu -save
+
+#Boardwalk
+#CMD umt -tpu -save -youtube "https://www.youtube.com/watch?v=w_DfTc7F5oQ"
+#16th street mall
+#cmd umt -tpu -save -youtube "https://www.youtube.com/watch?v=VVZ4kQMpVNY"

@@ -4,6 +4,8 @@ import tflite_runtime.interpreter as tflite
 from PIL import Image
 import numpy as np
 
+import pafy
+
 import cv2
 from scipy.spatial.distance import cosine
 
@@ -46,6 +48,16 @@ def camera_frame_gen(args):
 
     pass
 
+def youtube_frame_gen(args):
+    url = args.youtube
+    logging.info(f'   > Using YouTube for video source: {url}')
+    video = pafy.new(url)
+    best = video.getbest(preftype="mp4")
+
+    capture = cv2.VideoCapture(best.url)
+    while True:
+        grabbed, frame = capture.read()
+        yield Image.fromarray(frame)
 
 def image_seq_gen(args):
 
@@ -86,6 +98,8 @@ def initialize_img_source(args):
         
     # track objects from camera source
     if args.camera: return camera_frame_gen
+
+    if args.youtube: return youtube_frame_gen
 
 
 def initialize_detector(args):

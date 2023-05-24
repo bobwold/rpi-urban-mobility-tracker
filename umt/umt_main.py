@@ -71,6 +71,7 @@ def main():
     parser.add_argument('-display', dest='live_view', required=False, default=False, action='store_true', help='add this flag to view a live display. note, that this will greatly slow down the fps rate.')
     parser.add_argument('-save', dest='save_frames', required=False, default=False, action='store_true', help='add this flag if you want to persist the image output. note, that this will greatly slow down the fps rate.')
     parser.add_argument('-model', dest='model', type=str, required=False, default='mobilenet', help='Model to use-- current options are mobilenet or pednet')
+    parser.add_argument('-youtube', dest='youtube', type=str, required=False, help='YouTube url to use -- recommend https://www.youtube.com/watch?v=w_DfTc7F5oQ, https://www.youtube.com/watch?v=B0YjuKbVZ5w, https://www.youtube.com/watch?v=1GYGgsF4Vic')
     args = parser.parse_args()
     
     # basic checks
@@ -126,7 +127,20 @@ def main():
     videoStartTime = time.time()
     
     with open(TRACKER_OUTPUT_TEXT_FILE, 'w') as out_file:
+        
+        wholeLoopCtr = PerfCounter("Loop")
+        detectCtr = PerfCounter("Detect")
+        trackCtr = PerfCounter("Track")
+        framesCtr = PerfCounter("Frames")
+        rawVideoCtr = PerfCounter("RawVideo")
+        detectedVideoCtr = PerfCounter("DetectedVideo")
+        saveFramesCtr = PerfCounter("Entire Frame Wrtiting")
+
+        wholeLoopCtr.start()
+
         for i, pil_img in enumerate(img_generator(args)):
+
+            if(i>250): break
         
             f_time = int(time.time())
             logging.debug(f'> FRAME: {i}')
@@ -169,13 +183,16 @@ def main():
 
 
             # get detections
+            detectCtr.start()
             detections = generate_detections(pil_img, interpreter, args.threshold, args)
+            detectCtr.stop()
 			
             # proceed to updating state
             if len(detections) == 0: logging.debug('   > no detections...')
             else:
             
                 # update tracker
+                trackCtr.start();
                 tracker.predict()
                 tracker.update(detections)
                 
@@ -191,6 +208,8 @@ def main():
                             f'{int(bbox[2])},{int(bbox[3])}')
                         print(row, file=out_file)
                 
+                trackCtr.stop();
+            
             ##### Calculating the fps 
             # Note that it's odd to do it here, but we calculate it in time to write it on the image
             fps = 0
@@ -208,13 +227,15 @@ def main():
 
             # only for live display
             if args.live_view or args.save_frames:
-            
+                saveFramesCtr.start()
             	# convert pil image to cv2
                 cv2_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
             
                 # write a frame to the "original" video
                 if args.save_frames: 
+                    rawVideoCtr.start()
                     originalVideoWriter.write(cv2_img)
+                    rawVideoCtr.stop()
 
             	# cycle through actively tracked objects
                 for track in tracker.tracks:
@@ -236,7 +257,9 @@ def main():
                     
                 # persist frames
                 if args.save_frames: 
+                    framesCtr.start()
                     cv2.imwrite(os.path.join(FRAME_OUTPUT_PATH, f'frame_{i:0>7}.jpg'), cv2_img)
+                    framesCtr.stop()
                     
                     #write some interesting tid-bits
                     label = (
@@ -247,7 +270,21 @@ def main():
                     
                     draw_label(cv2_img, text=label)
                     # write a frame to the "detected" video
+                    detectedVideoCtr.start()
                     detectedVideoWriter.write(cv2_img)
+                    detectedVideoCtr.stop()
+                saveFramesCtr.stop()
+        
+        logging.info("+++Performance+++")
+        wholeLoopCtr.stop()
+
+        logging.info(wholeLoopCtr)
+        logging.info(detectCtr)
+        logging.info(trackCtr)
+        logging.info(framesCtr)
+        logging.info(rawVideoCtr)
+        logging.info(detectedVideoCtr)
+        logging.info(saveFramesCtr)
                 
     #cleanup the video resources                
     if(originalVideoWriter != None) : originalVideoWriter.release()
@@ -260,6 +297,25 @@ def main():
 #--- MAIN ---------------------------------------------------------------------+
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception as e:
+        logging.exception("main crashed. Error: %s", e)
      
 #--- END ----------------------------------------------------------------------+
+
+class PerfCounter:
+    def __init__(self, name):
+        self.name = name
+        self.cumtime = 0
+        self.ncalls = 0
+
+    def start(self):
+        self.starttime = time.time()
+
+    def stop(self):
+        self.cumtime += (time.time() - self.starttime)
+        self.ncalls += 1
+    
+    def __str__(self):
+        return f"{self.name} (ncalls: {self.ncalls}, cumtime: {self.cumtime})"
